@@ -1,0 +1,8 @@
+# rust binaries
+/target
+
+# nix binaries
+.direnv
+
+# tmp folder
+tmp
