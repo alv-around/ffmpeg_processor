@@ -7,11 +7,10 @@ use axum::{
 };
 use futures::StreamExt;
 use std::collections::VecDeque;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::thread;
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
-use tokio::sync::mpsc::{Sender, channel};
-use tokio::{pin, select};
 use tower_http::trace::TraceLayer;
 use tracing::instrument;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -33,37 +32,38 @@ async fn main() {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    // TODO: research the influence of the buffer size
-    let (tx, mut rc) = channel::<String>(10);
-    let tx = Arc::new(tx);
-    let mut queue = VecDeque::new();
+    // Create the the workers queue
+    let queue = Arc::new(Mutex::new(VecDeque::new()));
+    let queue_thread = Arc::clone(&queue);
+    thread::spawn(move || {
+        loop {
+            if let Ok(mut queue) = queue_thread.lock()
+                && let Some(job) = queue.pop_back()
+            {
+                tracing::debug!(
+                    "Substracting job to working queue. Queue length: {}",
+                    queue.len()
+                );
+                tracing::info!("starting job: {}", job);
+            }
+        }
+    });
 
     let app = Router::new()
         .route("/about", get(|| async { "this is an experiment" }))
         .route("/{user_id}", post(register_video))
         .layer(TraceLayer::new_for_http())
-        .with_state(tx);
+        .with_state(queue);
 
     // run our app with hyper, listening globally on port 3000
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
     tracing::info!("listening on {}", listener.local_addr().unwrap());
-    let server = axum::serve(listener, app).into_future();
-
-    pin!(server);
-    loop {
-        select! {
-            Some(job) = rc.recv() => {
-                tracing::trace!("adding job to the queue: {:?}", job);
-                queue.push_front(job);
-            },
-            _ = &mut server => {},
-        }
-    }
+    let _server = axum::serve(listener, app).await;
 }
 
 #[instrument]
 async fn register_video(
-    State(tx): State<Arc<Sender<String>>>,
+    State(queue): State<Arc<Mutex<VecDeque<String>>>>,
     Path(id): Path<String>,
     body: Body,
 ) -> Result<StatusCode, StatusCode> {
@@ -80,9 +80,12 @@ async fn register_video(
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     }
 
-    tx.send(path)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    Ok(StatusCode::OK)
+    match queue.lock() {
+        Ok(mut queue) => {
+            queue.push_front(path);
+            tracing::debug!("Adding job to working queue. Queue length: {}", queue.len());
+            Ok(StatusCode::OK)
+        }
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+    }
 }
