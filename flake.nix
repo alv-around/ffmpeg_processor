@@ -36,9 +36,14 @@
         rustToolchain
 
         # add additional required libraries for project. ex: glib
+        ffmpeg_7
       ];
 
-      nativeBuildInputs = [pkgs.pkg-config];
+      nativeBuildInputs = with pkgs; [
+        pkg-config
+        rustPlatform.bindgenHook # Sets LIBCLANG_PATH automatically
+        clang
+      ];
 
       env.RUST_SRC_PATH = "${pkgs.rust.packages.stable.rustPlatform.rustLibSrc}";
     };

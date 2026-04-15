@@ -5,6 +5,7 @@ use axum::{
     Router,
     routing::{get, post},
 };
+use ez_ffmpeg::{FfmpegContext, FfmpegScheduler};
 use futures::StreamExt;
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
@@ -24,7 +25,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 async fn register_video(Path(id): Path<String>, body: Body) -> Result<StatusCode, StatusCode> {
     let mut video = body.into_data_stream();
-    let mut file = File::create(format!("tmp/test_file_{}", id))
+    let path = format!("tmp/test_file_{}.mp4", id);
+    let output = format!("tmp/output_{}.mp4", id);
+    let mut file = File::create(&path)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     while let Some(frame) = video.next().await {
@@ -33,5 +36,20 @@ async fn register_video(Path(id): Path<String>, body: Body) -> Result<StatusCode
             .await
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     }
+
+    // 1. Build the FFmpeg context
+    let context = FfmpegContext::builder()
+        .input(path)
+        .output(output)
+        .build()
+        .map_err(|_| StatusCode::BAD_REQUEST)?;
+
+    let scheduler = FfmpegScheduler::new(context)
+        .start()
+        .map_err(|_| StatusCode::BAD_REQUEST)?;
+
+    // 3. Block until it's finished
+    scheduler.wait().map_err(|_| StatusCode::BAD_REQUEST)?;
+
     Ok(StatusCode::OK)
 }
