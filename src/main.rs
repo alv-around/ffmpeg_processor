@@ -40,11 +40,11 @@ async fn main() {
             if let Ok(mut queue) = queue_thread.lock()
                 && let Some(job) = queue.pop_back()
             {
-                tracing::debug!(
+                tracing::trace!(
                     "Substracting job to working queue. Queue length: {}",
                     queue.len()
                 );
-                tracing::info!("starting job: {}", job);
+                tracing::info!("thread queue - starting job: {}", job);
             }
         }
     });
@@ -83,7 +83,7 @@ async fn register_video(
     match queue.lock() {
         Ok(mut queue) => {
             queue.push_front(path);
-            tracing::debug!("Adding job to working queue. Queue length: {}", queue.len());
+            tracing::trace!("Adding job to working queue. Queue length: {}", queue.len());
             Ok(StatusCode::OK)
         }
         Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
