@@ -32,7 +32,7 @@ async fn main() {
 
     let app = Router::new()
         .route("/about", get(|| async { "this is an experiment" }))
-        .route("/{user_id}", post(register_video))
+        .route("/{video_id}", post(register_video))
         .layer(TraceLayer::new_for_http());
 
     // run our app with hyper, listening globally on port 3000
@@ -66,7 +66,7 @@ async fn register_video(Path(id): Path<String>, body: Body) -> Result<StatusCode
         .build()
         .map_err(|_| "error initializing ffmpeg")?;
 
-    let scheduler = FfmpegScheduler::new(context)
+    FfmpegScheduler::new(context)
         .start()
         .map_err(|_| "error processing video")?
         .await
