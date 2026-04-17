@@ -1,5 +1,5 @@
 use axum::body::Body;
-use axum::extract::{Path, State};
+use axum::extract::Path;
 use axum::http::StatusCode;
 use axum::{
     Router,
@@ -7,9 +7,6 @@ use axum::{
 };
 use ez_ffmpeg::{FfmpegContext, FfmpegScheduler};
 use futures::StreamExt;
-use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
-use std::thread;
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
 use tower_http::trace::TraceLayer;
@@ -33,28 +30,10 @@ async fn main() {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    // Create the the workers queue
-    let queue = Arc::new(Mutex::new(VecDeque::new()));
-    let queue_thread = Arc::clone(&queue);
-    thread::spawn(move || {
-        loop {
-            if let Ok(mut queue) = queue_thread.lock()
-                && let Some(job) = queue.pop_back()
-            {
-                tracing::debug!(
-                    "Substracting job to working queue. Queue length: {}",
-                    queue.len()
-                );
-                tracing::info!("starting job: {}", job);
-            }
-        }
-    });
-
     let app = Router::new()
         .route("/about", get(|| async { "this is an experiment" }))
         .route("/{user_id}", post(register_video))
-        .layer(TraceLayer::new_for_http())
-        .with_state(queue);
+        .layer(TraceLayer::new_for_http());
 
     // run our app with hyper, listening globally on port 3000
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
@@ -63,38 +42,35 @@ async fn main() {
 }
 
 #[instrument]
-async fn register_video(
-    State(queue): State<Arc<Mutex<VecDeque<String>>>>,
-    Path(id): Path<String>,
-    body: Body,
-) -> Result<StatusCode, StatusCode> {
+async fn register_video(Path(id): Path<String>, body: Body) -> Result<StatusCode, &'static str> {
     let mut video = body.into_data_stream();
     let path = format!("tmp/test_file_{}.mp4", id);
     let output = format!("tmp/output_{}.mp4", id);
     let mut file = File::create(&path)
         .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        .map_err(|_| "error creating file")?;
 
     while let Some(frame) = video.next().await {
-        let chunk = frame.map_err(|_| StatusCode::BAD_REQUEST)?;
+        let chunk = frame.map_err(|_| "error reading file")?;
         file.write_all(&chunk)
             .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            .map_err(|_| "error backing file")?;
     }
+
+    tracing::debug!("file stored in path: {}", path);
 
     // 1. Build the FFmpeg context
     let context = FfmpegContext::builder()
         .input(path)
         .output(output)
         .build()
-        .map_err(|_| StatusCode::BAD_REQUEST)?;
+        .map_err(|_| "error initializing ffmpeg")?;
 
     let scheduler = FfmpegScheduler::new(context)
         .start()
-        .map_err(|_| StatusCode::BAD_REQUEST)?;
-
-    // 3. Block until it's finished
-    scheduler.wait().map_err(|_| StatusCode::BAD_REQUEST)?;
+        .map_err(|_| "error processing video")?
+        .await
+        .map_err(|_| "error processing video")?;
 
     Ok(StatusCode::OK)
 }
