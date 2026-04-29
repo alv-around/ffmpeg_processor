@@ -7,5 +7,7 @@ This service efficiently process your videos with ffmpeg
 To process a video with ffmpeg:
 
 ```console
-ffmpeg -i test/trial_video.mp4 -c:v libx264 test/output.mp4
+ffmpeg -i tests/data/trial_video.mp4 tests/data/output.mp4
 ```
+
+> currently an instance of ffmpeg_processor need to run to pass all tests
