@@ -16,3 +16,22 @@ pub async fn run_ffmpeg(input_path: String, output_path: String) -> Result<(), &
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use same_file::is_same_file;
+
+    #[tokio::test]
+    async fn test_ffmpeg_wrapper() {
+        // 1. Build the FFmpeg context
+        run_ffmpeg(
+            "tests/data/trial_video.mp4".to_string(),
+            "tmp/test_output.mp4".to_string(),
+        )
+        .await
+        .unwrap();
+
+        assert!(is_same_file("tmp/test_output.mp4", "tests/data/output.mp4").is_ok());
+    }
+}
