@@ -358,6 +358,7 @@ dependencies = [
  "ez-ffmpeg",
  "futures",
  "reqwest",
+ "same-file",
  "serde",
  "serde_json",
  "tokio",
