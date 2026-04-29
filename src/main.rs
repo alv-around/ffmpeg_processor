@@ -1,34 +1,23 @@
+use ffmpeg_processor::ffmpeg::run_ffmpeg;
+use ffmpeg_processor::tracing::init_tracing;
+
 use axum::body::Body;
 use axum::extract::Path;
-use axum::http::StatusCode;
+use axum::http::header;
+use axum::response::IntoResponse;
 use axum::{
     Router,
     routing::{get, post},
 };
-use ez_ffmpeg::{FfmpegContext, FfmpegScheduler};
 use futures::StreamExt;
-use tokio::fs::File;
+use tokio::fs::{self, File};
 use tokio::io::AsyncWriteExt;
 use tower_http::trace::TraceLayer;
 use tracing::instrument;
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::registry()
-        .with(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-                // axum logs rejections from built-in extractors with the `axum::rejection`
-                // target, at `TRACE` level. `axum::rejection=trace` enables showing those events
-                format!(
-                    "{}=debug,tower_http=debug,axum::rejection=trace",
-                    env!("CARGO_CRATE_NAME")
-                )
-                .into()
-            }),
-        )
-        .with(tracing_subscriber::fmt::layer())
-        .init();
+    init_tracing();
 
     let app = Router::new()
         .route("/about", get(|| async { "this is an experiment" }))
@@ -42,7 +31,10 @@ async fn main() {
 }
 
 #[instrument]
-async fn register_video(Path(id): Path<String>, body: Body) -> Result<StatusCode, &'static str> {
+async fn register_video(
+    Path(id): Path<String>,
+    body: Body,
+) -> Result<impl IntoResponse, &'static str> {
     let mut video = body.into_data_stream();
     let path = format!("tmp/test_file_{}.mp4", id);
     let output = format!("tmp/output_{}.mp4", id);
@@ -59,18 +51,10 @@ async fn register_video(Path(id): Path<String>, body: Body) -> Result<StatusCode
 
     tracing::debug!("file stored in path: {}", path);
 
-    // 1. Build the FFmpeg context
-    let context = FfmpegContext::builder()
-        .input(path)
-        .output(output)
-        .build()
-        .map_err(|_| "error initializing ffmpeg")?;
+    run_ffmpeg(path, output.clone()).await?;
 
-    FfmpegScheduler::new(context)
-        .start()
-        .map_err(|_| "error processing video")?
-        .await
-        .map_err(|_| "error processing video")?;
-
-    Ok(StatusCode::OK)
+    match fs::read(output).await {
+        Ok(bytes) => Ok(([(header::CONTENT_TYPE, "video/mp4")], bytes)),
+        Err(_) => Err("error reading the output file"),
+    }
 }
