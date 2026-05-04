@@ -21,8 +21,14 @@ To run the tests:
 ```console
 cargo test
 cargo bench
-# To run the stress test
-cargo test -- --features stress-test
+```
+
+### Stress Test
+
+To run the stress test
+
+```
+$TEST_ENV_VARS cargo test --test harness -- --no-capture --ignored
 ```
 
 > to run the stress test, you need to have an instance of ffmpeg_processor
